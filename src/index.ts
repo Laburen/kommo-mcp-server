@@ -1,6 +1,6 @@
 import { MyMCP } from "./mcp";
 export { MyMCP } from "./mcp";
-import { Env } from "./types";
+import type { Env } from "./types";
 import { parseTools } from "./utils/parseTools";
 
 export default {

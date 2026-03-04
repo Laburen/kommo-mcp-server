@@ -2,6 +2,7 @@ import { McpAgent } from "agents/mcp";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { addBudgetToLead, addNoteToLead, addTagToLead, getLead, moveLead, pauseLeadAgent } from "./tools/leads";
+import { updateContactField } from "./tools/contacts";
 import { canUseTool } from "./utils/canUseTools";
 
 export class MyMCP extends McpAgent {
@@ -340,6 +341,61 @@ export class MyMCP extends McpAgent {
 								{
 									type: "text",
 									text: `Error al agregar el presupuesto al lead: ${(error as Error).message || String(error)}`
+								}
+							]
+						}
+					}
+				}
+			);
+		}
+
+		/*──────────────── update_contact_field ──────────────*/
+		if (canUseTool(kommoCLient, "update_contact_field")) {
+			this.server.tool(
+				"update_contact_field",
+				"This tool updates a custom enum/select field on a contact in Kommo.",
+				{
+					contact_id: z
+						.number()
+						.describe("ID del contacto en Kommo CRM."),
+					field_id: z
+						.number()
+						.describe("ID del campo custom a actualizar."),
+					enum_id: z
+						.number()
+						.describe("ID del valor enum a setear en el campo.")
+				},
+				async ({ contact_id, field_id, enum_id }) => {
+					try {
+						const res = await updateContactField(contact_id, field_id, enum_id, kommoCLient);
+
+						if (res === null) {
+							return {
+								content: [
+									{
+										type: "text",
+										text: "Failed to update contact field: Kommo API rejected the request. Please verify the contact_id, field_id, and enum_id are valid."
+									}
+								]
+							}
+						}
+
+						return {
+							content: [
+								{
+									type: "text",
+									text: "Contact field updated successfully."
+								}
+							]
+						}
+
+					} catch (error) {
+						console.error("💥 [update_contact_field] Error:", error);
+						return {
+							content: [
+								{
+									type: "text",
+									text: `Error al actualizar el campo del contacto: ${(error as Error).message || String(error)}`
 								}
 							]
 						}
