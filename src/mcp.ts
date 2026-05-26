@@ -220,6 +220,105 @@ export class MyMCP extends McpAgent {
 			)
 		}
 
+		/*──────────────── request_human ──────────────*/
+		if (canUseTool(kommoCLient, "request_human")) {
+			this.server.tool(
+				"request_human",
+				"Escalates a lead to a human agent in a single call. Moves the lead to the specified pipeline/status, pauses the AI agent via the switch field, and adds a summary note. Operations run best-effort: if one fails, the others still execute and the response reports the outcome of each step.",
+				{
+					lead_id: z
+						.number()
+						.describe("Unique ID assigned by Kommo CRM to the lead. This identifier is used to fetch all related information for a specific lead within the system."),
+					pipeline_id: z
+						.number()
+						.describe("ID of the pipeline where the lead should be moved when escalating to a human."),
+					status_id: z
+						.number()
+						.describe("ID of the stage within the target pipeline where the lead should be placed."),
+					switch_field_id: z
+						.number()
+						.describe("ID of the switch field that controls the AI agent pause state for this lead."),
+					switch_field_value: z
+						.boolean()
+						.describe("Value to set on the switch field (typically false to pause the AI agent)."),
+					note: z
+						.string()
+						.describe("Summary note explaining why the lead is being escalated to a human, stored in the lead's activity history.")
+				},
+				async ({ lead_id, pipeline_id, status_id, switch_field_id, switch_field_value, note }) => {
+					try {
+						const lead = await getLead(lead_id, kommoCLient);
+
+						if (lead === null) {
+							return {
+								content: [
+									{
+										type: "text",
+										text: JSON.stringify({
+											status: "failed",
+											lead_id,
+											error: "lead_not_found",
+											message: "The specified lead does not exist in Kommo or could not be retrieved."
+										})
+									}
+								]
+							}
+						}
+
+						const moveRes = await moveLead(lead_id, pipeline_id, status_id, kommoCLient);
+						const pauseRes = await pauseLeadAgent(lead_id, switch_field_id, switch_field_value, kommoCLient);
+						const noteRes = await addNoteToLead(lead_id, kommoCLient, note);
+
+						const steps = {
+							move_lead: moveRes !== null,
+							pause_agent: pauseRes !== null,
+							add_note: noteRes !== null
+						};
+
+						const allOk = steps.move_lead && steps.pause_agent && steps.add_note;
+						const failed_steps: { step: string; hint: string }[] = [];
+
+						if (!steps.move_lead) failed_steps.push({ step: "move_lead", hint: "verify pipeline_id and status_id" });
+						if (!steps.pause_agent) failed_steps.push({ step: "pause_agent", hint: "verify switch_field_id" });
+						if (!steps.add_note) failed_steps.push({ step: "add_note", hint: "verify note content" });
+
+						return {
+							content: [
+								{
+									type: "text",
+									text: JSON.stringify({
+										status: allOk ? "success" : "partial",
+										lead_id,
+										steps,
+										failed_steps,
+										message: allOk
+											? "Human handoff completed."
+											: "Human handoff partially completed."
+									})
+								}
+							]
+						}
+
+					} catch (error) {
+						console.error("💥 [request_human] Error:", error);
+						return {
+							content: [
+								{
+									type: "text",
+									text: JSON.stringify({
+										status: "error",
+										lead_id,
+										error: "unexpected_error",
+										message: (error as Error).message || String(error)
+									})
+								}
+							]
+						}
+					}
+				}
+			);
+		}
+
 		/*──────────────── add_tag ──────────────*/
 		if (canUseTool(kommoCLient, "add_tag")) {
 			this.server.tool(

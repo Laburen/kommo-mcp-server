@@ -25,7 +25,7 @@
   "vars": {
     "KOMMO_LONG_DURATION_TOKEN": "",
     "KOMMO_ACCOUNT_SUBDOMAIN": "",
-    "TOOLS_TO_USE" : []
+    "TOOLS_TO_USE" : [""]
   }
 }
 
