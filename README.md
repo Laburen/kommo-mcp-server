@@ -1,302 +1,89 @@
 # kommo-mcp-server
 
-Servidor MCP (Model Context Protocol) diseñado para funcionar con el ecosistema de **Laburen.com**, incluyendo su integración nativa con Kommo CRM. Este servidor expone herramientas que permiten a los agentes de IA de Laburen gestionar leads, moverlos entre pipelines, pausar agentes y agregar notas contextuales directamente en Kommo.
+Servidor MCP (Model Context Protocol) que integra los agentes de **Laburen.com** con **Kommo CRM**. Expone herramientas para gestionar leads (mover, pausar agente, notas, tags, presupuesto, escalado a humano) y contactos. Corre en **Cloudflare Workers** con **Durable Objects** para el estado de las conexiones MCP.
 
-## 🎯 Descripción General
+## Arquitectura
 
-Este servidor MCP forma parte del ecosistema de **Laburen.com** y actúa como un puente entre los agentes de IA de Laburen y la API de Kommo CRM, aprovechando la integración nativa entre ambas plataformas. Proporciona herramientas especializadas para la gestión automatizada de leads, permitiendo que los agentes de Laburen interactúen directamente con Kommo para mover leads, pausar agentes y agregar notas contextuales. El servidor se ejecuta en Cloudflare Workers y utiliza Durable Objects para mantener el estado de las conexiones MCP.
+- **`src/index.ts`** — Entry point del Worker. Lee la config de los headers HTTP (prioridad) o las env vars, la inyecta en `ctx.props` y enruta a `/sse`, `/sse/message` (SSE) o `/mcp` (HTTP).
+- **`src/mcp.ts`** — `MyMCP extends McpAgent`. Registra dinámicamente solo las tools habilitadas en `TOOLS_TO_USE`.
+- **`src/tools/leads.ts`** — Funciones contra la API de Kommo para leads.
+- **`src/tools/contacts.ts`** — Funciones contra la API de Kommo para contactos.
+- **`src/utils/`** — `canUseTools.ts` (chequea si una tool está habilitada) y `parseTools.ts` (parsea `TOOLS_TO_USE` desde JSON array o CSV).
 
-## ✨ Características Principales
-
-### 1. **Servidor MCP Completo**
-- Implementación del protocolo MCP (Model Context Protocol)
-- Soporte para Server-Sent Events (SSE) para comunicación en tiempo real
-- Integración con el SDK oficial de MCP
-
-### 2. **Herramientas de Gestión de Leads**
-- **Mover leads** entre pipelines y estados
-- **Pausar agentes** asignados a leads específicos
-- **Agregar notas** contextuales al historial de leads
-
-### 3. **Configuración Flexible**
-- Configuración mediante variables de entorno
-- Sobrescritura por headers HTTP en cada request
-- Control granular de herramientas habilitadas
-
-### 4. **Multi-cuenta**
-- Soporte para múltiples cuentas de Kommo mediante configuración dinámica
-- Autenticación independiente por cuenta
-
-## 🏗️ Arquitectura
-
-### Componentes Principales
-
-- **Entry Point** (`src/index.ts`): Maneja las peticiones HTTP y enruta a los endpoints MCP
-- **MCP Server** (`src/mcp.ts`): Define el servidor MCP y registra las herramientas disponibles
-- **Tools** (`src/tools/leads.ts`): Implementa las funciones para interactuar con la API de Kommo
-- **Utils** (`src/utils/`): Utilidades para validación y parsing de configuración
-
-### Tecnologías
-
-- **Cloudflare Workers**: Plataforma de ejecución serverless
-- **Durable Objects**: Para mantener estado de conexiones MCP
-- **Model Context Protocol SDK**: SDK oficial para servidores MCP
-- **Kommo API v4**: Integración nativa con el CRM de Kommo
-- **Laburen.com**: Ecosistema de agentes de IA integrado
-- **TypeScript**: Lenguaje de programación
-- **Zod**: Validación de esquemas
-
-## 📋 Requisitos
-
-### Variables de Entorno
-
-El servidor puede recibir configuración de dos formas (los headers tienen prioridad sobre las variables de entorno):
-
-#### 1. Variables de Entorno (en `wrangler.jsonc` o Cloudflare Dashboard)
-
-```json
-{
-  "KOMMO_LONG_DURATION_TOKEN": "tu_token_de_kommo",
-  "KOMMO_ACCOUNT_SUBDOMAIN": "tu_subdominio",
-  "TOOLS_TO_USE": ["move_lead", "pause_agent", "add_note"]
-}
+```
+src/
+├── index.ts            # Worker fetch handler + routing
+├── mcp.ts              # Servidor MCP y registro de tools
+├── types.ts            # Tipos (Env, etc.)
+├── tools/
+│   ├── leads.ts        # API de leads
+│   └── contacts.ts     # API de contactos
+└── utils/
+    ├── canUseTools.ts
+    └── parseTools.ts
 ```
 
-#### 2. Headers HTTP (prioridad sobre env)
+## Configuración
 
-Cada request puede incluir headers para sobrescribir la configuración:
+La config se toma de los **headers HTTP** (prioridad) o de las **env vars** (`wrangler.jsonc` / dashboard de Cloudflare):
 
-- `KOMMO_LONG_DURATION_TOKEN`: Token de autenticación de Kommo
-- `KOMMO_ACCOUNT_SUBDOMAIN`: Subdominio de la cuenta de Kommo
-- `TOOLS_TO_USE`: Lista de herramientas habilitadas (formato JSON array o CSV)
+| Clave | Descripción |
+|-------|-------------|
+| `KOMMO_LONG_DURATION_TOKEN` | Bearer token de larga duración de Kommo |
+| `KOMMO_ACCOUNT_SUBDOMAIN` | Subdominio de la cuenta (`https://{subdominio}.kommo.com`) |
+| `TOOLS_TO_USE` | Tools habilitadas — JSON array `["move_lead","add_note"]` o CSV `move_lead,add_note` |
 
-**Formato de `TOOLS_TO_USE`:**
-- JSON: `["move_lead", "pause_agent", "add_note"]`
-- CSV: `move_lead,pause_agent,add_note`
+Solo las tools listadas en `TOOLS_TO_USE` se registran en el servidor.
 
-## 🚀 Instalación y Despliegue
+## Tools
 
-### Desarrollo Local
+Todas las tools de lead validan que el lead exista (`getLead`) antes de operar. Devuelven un mensaje de texto con el resultado.
+
+| Tool | Parámetros | Descripción |
+|------|-----------|-------------|
+| `move_lead` | `lead_id`, `pipeline_id`, `status_id` | Mueve el lead a otro pipeline/estado |
+| `pause_agent` | `lead_id`, `switch_field_id`, `switch_field_value` | Pausa el agente IA seteando un campo switch del lead |
+| `add_note` | `lead_id`, `note` | Agrega una nota al historial del lead |
+| `add_tag` | `lead_id`, `tag_id` | Agrega un tag al lead |
+| `add_budget` | `lead_id`, `budget_field_value` | Setea el presupuesto (`price`) del lead |
+| `request_human` | `lead_id`, `pipeline_id`, `status_id`, `switch_field_id`, `switch_field_value`, `note` | Escala a humano: mueve el lead + pausa el agente + agrega nota, en una sola llamada |
+| `update_contact_field` | `contact_id`, `field_id`, `enum_id` | Actualiza un campo custom enum/select de un contacto |
+
+**`request_human`** corre best-effort: si un paso falla, los demás igual se ejecutan. Devuelve un JSON con `status` (`success` / `partial` / `error`) y el detalle de cada paso (`steps`, `failed_steps`).
+
+## Endpoints
+
+| Ruta | Uso |
+|------|-----|
+| `/mcp` | Transporte MCP sobre HTTP |
+| `/sse`, `/sse/message` | Transporte MCP sobre Server-Sent Events |
+
+## Desarrollo
 
 ```bash
-# Instalar dependencias
 npm install
-
-# Ejecutar en modo desarrollo
-npm run dev
-
-# O usando wrangler directamente
-wrangler dev
+npm run dev          # wrangler dev (local)
+npm run type-check   # tsc --noEmit
+npm run format       # Biome
+npm run lint:fix     # Biome lint --fix
 ```
 
-### Despliegue a Producción
+> El proyecto requiere `legacy-peer-deps=true` (ver `.npmrc`): el paquete `agents` declara `react` como peer dependency.
+
+## Deploy (CI/CD)
+
+El deploy es automático vía **GitHub Actions** (`.github/workflows/deploy.yml`): cada push a `main` corre `type-check` y, si pasa, deploya a Cloudflare con `wrangler-action`.
+
+- Secret requerido en el repo: **`CLOUDFLARE_API_TOKEN`** (permiso *Workers Scripts → Edit*).
+- El `account_id` está en `wrangler.jsonc`, no hace falta como secret.
+
+Deploy manual:
 
 ```bash
-# Desplegar a Cloudflare Workers
-npm run deploy
-
-# O usando wrangler directamente
-wrangler deploy
+npm run deploy   # wrangler deploy
 ```
 
-### Scripts Disponibles
+## Notas
 
-- `npm run dev`: Inicia el servidor en modo desarrollo
-- `npm run deploy`: Despliega a Cloudflare Workers
-- `npm run format`: Formatea el código con Biome
-- `npm run lint:fix`: Corrige problemas de linting
-- `npm run type-check`: Verifica tipos de TypeScript
-- `npm run cf-typegen`: Genera tipos de Cloudflare Workers
-
-## 📡 Endpoints
-
-### MCP Server (HTTP)
-
-```
-GET /mcp
-```
-
-Endpoint principal del servidor MCP para comunicación HTTP.
-
-### Server-Sent Events (SSE)
-
-```
-GET /sse
-GET /sse/message
-```
-
-Endpoints para comunicación mediante Server-Sent Events, permitiendo comunicación en tiempo real con clientes MCP.
-
-## 🛠️ Herramientas Disponibles
-
-El servidor expone las siguientes herramientas MCP para interactuar con Kommo:
-
-### `move_lead`
-****
-Mueve un lead a un pipeline y estado diferente en Kommo.
-
-**Parámetros:**
-- `lead_id` (number): ID único del lead en Kommo
-- `pipeline_id` (number): ID del pipeline destino
-- `status_id` (number): ID del estado dentro del pipeline
-
-**Ejemplo de uso:**
-```json
-{
-  "lead_id": 12345,
-  "pipeline_id": 1,
-  "status_id": 2
-}
-```
-
-**Respuestas:**
-- ✅ Éxito: "Lead successfully moved to the specified pipeline and status."
-- ❌ Lead no existe: "Failed to move lead: the specified lead does not exist in Kommo."
-- ❌ Error de API: "Failed to move lead: Kommo did not accept the update request."
-
-### `pause_agent`
-
-Pausa el agente asignado a un lead específico actualizando un campo personalizado en Kommo.
-
-**Parámetros:**
-- `lead_id` (number): ID único del lead en Kommo
-
-**Ejemplo de uso:**
-```json
-{
-  "lead_id": 12345
-}
-```
-
-**Respuestas:**
-- ✅ Éxito: "Agent successfully paused for the specified lead."
-- ❌ Lead no existe: "Failed to pause agent: the specified lead does not exist in Kommo."
-
-### `add_note`
-
-Añade una nota contextual al historial de un lead en Kommo.
-
-**Parámetros:**
-- `lead_id` (number): ID único del lead en Kommo
-- `note` (string): Nota a agregar al historial del lead
-
-**Ejemplo de uso:**
-```json
-{
-  "lead_id": 12345,
-  "note": "Cliente interesado en producto premium. Seguimiento programado para mañana."
-}
-```
-
-**Respuestas:**
-- ✅ Éxito: "Note added succesfully."
-- ❌ Error: "Error adding the note."
-
-## 🔧 Configuración de Herramientas
-
-Las herramientas se pueden habilitar o deshabilitar mediante la variable `TOOLS_TO_USE`. Solo las herramientas listadas estarán disponibles en el servidor MCP.
-
-**Ejemplo - Solo habilitar `move_lead` y `add_note`:**
-```json
-{
-  "TOOLS_TO_USE": ["move_lead", "add_note"]
-}
-```
-
-**Ejemplo - Deshabilitar todas las herramientas:**
-```json
-{
-  "TOOLS_TO_USE": []
-}
-```
-
-## 🔗 Integración con Laburen.com
-
-Este servidor MCP está diseñado específicamente para funcionar dentro del ecosistema de **Laburen.com**. Los agentes de IA de Laburen pueden utilizar este servidor MCP para interactuar con Kommo CRM mediante la integración nativa entre ambas plataformas.
-
-### Flujo de Integración
-
-1. Los agentes de Laburen se conectan al servidor MCP
-2. El servidor MCP expone herramientas especializadas para Kommo
-3. Los agentes utilizan estas herramientas para gestionar leads en Kommo
-4. Las acciones se ejecutan directamente en la cuenta de Kommo configurada
-
-## 🔐 Autenticación con Kommo
-
-El servidor utiliza tokens de larga duración de Kommo para autenticarse. Para obtener un token:
-
-1. Accede a la configuración de tu cuenta de Kommo
-2. Ve a Integraciones → API
-3. Genera un token de larga duración
-4. Configúralo en las variables de entorno o headers
-
-**Nota:** El token debe tener los siguientes scopes:
-- `crm`: Acceso al CRM
-- `files`: Acceso a archivos (si es necesario)
-- `notifications`: Notificaciones (si es necesario)
-
-## 📊 Estructura del Proyecto
-
-```
-kommo-mcp-server/
-├── src/
-│   ├── index.ts              # Punto de entrada del worker
-│   ├── mcp.ts                # Servidor MCP y definición de herramientas
-│   ├── types.ts              # Tipos TypeScript
-│   ├── tools/
-│   │   └── leads.ts          # Funciones para interactuar con API de Kommo
-│   └── utils/
-│       ├── canUseTools.ts    # Validación de herramientas habilitadas
-│       └── parseTools.ts     # Parsing de configuración de herramientas
-├── wrangler.jsonc            # Configuración de Cloudflare Workers
-├── tsconfig.json             # Configuración de TypeScript
-├── biome.json                # Configuración de Biome (linter/formatter)
-└── package.json              # Dependencias del proyecto
-```
-
-## 🔍 Monitoreo y Observabilidad
-
-El servidor tiene observabilidad habilitada en Cloudflare Workers:
-- **Logs**: Registro de ejecución y errores
-- **Métricas**: Rendimiento y uso de recursos
-- **Trazabilidad**: Seguimiento de requests y herramientas utilizadas
-
-Los logs incluyen:
-- Errores de herramientas con prefijo `💥`
-- Errores de API con prefijo `❌`
-- Información de depuración
-
-## 🧪 Desarrollo
-
-### Validación de Tipos
-
-```bash
-npm run type-check
-```
-
-### Formateo de Código
-
-```bash
-npm run format
-```
-
-### Linting
-
-```bash
-npm run lint:fix
-```
-
-## 📝 Notas Técnicas
-
-- El servidor utiliza **Durable Objects** para mantener el estado de las conexiones MCP
-- Las herramientas se validan dinámicamente antes de ser expuestas
-- Todas las herramientas validan la existencia del lead antes de ejecutar la acción
-- Los errores se manejan de forma consistente y retornan mensajes descriptivos
-
-## 🤝 Contribución
-
-Este es un proyecto privado. Para cambios o mejoras, contacta al equipo de desarrollo.
-
-## 📄 Licencia
-
-Privado - Todos los derechos reservados.
+- Logs: errores de API con prefijo `❌`, excepciones de tools con `💥`. Observabilidad habilitada en `wrangler.jsonc`.
+- Proyecto privado del ecosistema Laburen.com.
