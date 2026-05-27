@@ -1,7 +1,7 @@
 import { McpAgent } from "agents/mcp";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { addBudgetToLead, addNoteToLead, addTagToLead, getLead, moveLead, pauseLeadAgent } from "./tools/leads";
+import { addBudgetToLead, addNoteToLead, addTagToLead, closeLead, getLead, moveLead, pauseLeadAgent } from "./tools/leads";
 import { updateContactField } from "./tools/contacts";
 import { canUseTool } from "./utils/canUseTools";
 
@@ -301,6 +301,99 @@ export class MyMCP extends McpAgent {
 
 					} catch (error) {
 						console.error("💥 [request_human] Error:", error);
+						return {
+							content: [
+								{
+									type: "text",
+									text: JSON.stringify({
+										status: "error",
+										lead_id,
+										error: "unexpected_error",
+										message: (error as Error).message || String(error)
+									})
+								}
+							]
+						}
+					}
+				}
+			);
+		}
+
+		/*──────────────── close_lead ──────────────*/
+		if (canUseTool(kommoCLient, "close_lead")) {
+			this.server.tool(
+				"close_lead",
+				"Closes a lead as lost in a single call. Sets the lead to the system 'lost' status (143) with the given loss reason, pauses the AI agent via the switch field, and adds a detailed note explaining why it was closed. Operations run best-effort: if one fails, the others still execute and the response reports the outcome of each step.",
+				{
+					lead_id: z
+						.number()
+						.describe("Unique ID assigned by Kommo CRM to the lead."),
+					loss_reason_id: z
+						.number()
+						.describe("ID of the loss reason to assign when closing the lead as lost. Must be a valid loss_reason_id from the Kommo account."),
+					switch_field_id: z
+						.number()
+						.describe("ID of the switch field that controls the AI agent pause state for this lead."),
+					note: z
+						.string()
+						.describe("Detailed note explaining why the lead is being closed/lost, stored in the lead's activity history.")
+				},
+				async ({ lead_id, loss_reason_id, switch_field_id, note }) => {
+					try {
+						const lead = await getLead(lead_id, kommoCLient);
+
+						if (lead === null) {
+							return {
+								content: [
+									{
+										type: "text",
+										text: JSON.stringify({
+											status: "failed",
+											lead_id,
+											error: "lead_not_found",
+											message: "The specified lead does not exist in Kommo or could not be retrieved."
+										})
+									}
+								]
+							}
+						}
+
+						const closeRes = await closeLead(lead_id, loss_reason_id, kommoCLient);
+						const pauseRes = await pauseLeadAgent(lead_id, switch_field_id, true, kommoCLient); // true = pausado (hardcoded)
+						const noteRes = await addNoteToLead(lead_id, kommoCLient, note);
+
+						const steps = {
+							close_lead: closeRes !== null,
+							pause_agent: pauseRes !== null,
+							add_note: noteRes !== null
+						};
+
+						const allOk = steps.close_lead && steps.pause_agent && steps.add_note;
+						const failed_steps: { step: string; hint: string }[] = [];
+
+						if (!steps.close_lead) failed_steps.push({ step: "close_lead", hint: "verify loss_reason_id is valid" });
+						if (!steps.pause_agent) failed_steps.push({ step: "pause_agent", hint: "verify switch_field_id" });
+						if (!steps.add_note) failed_steps.push({ step: "add_note", hint: "verify note content" });
+
+						return {
+							content: [
+								{
+									type: "text",
+									text: JSON.stringify({
+										status: allOk ? "success" : "partial",
+										lead_id,
+										steps,
+										failed_steps,
+										message: allOk
+											? "Lead closed as lost."
+											: "Lead close partially completed."
+									})
+								}
+							]
+						}
+
+					} catch (error) {
+						console.error("💥 [close_lead] Error:", error);
 						return {
 							content: [
 								{

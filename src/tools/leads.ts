@@ -1,3 +1,5 @@
+const CLOSED_LOST_STATUS_ID = 143; // estado de sistema "Cerrado - no logrado" (perdido)
+
 export async function getLead(lead_id: number, kommoCLient: any) {
     try {
         const res = await fetch(`https://${kommoCLient.KOMMO_ACCOUNT_SUBDOMAIN}.kommo.com/api/v4/leads/${lead_id}`, {
@@ -50,6 +52,37 @@ export async function moveLead(lead_id: number, pipeline_id: number, status_id: 
         return data;
     } catch (error) {
         console.error("❌ moveLead failed: unable to update pipeline or status for the specified lead.", error);
+        return null;
+    }
+}
+
+export async function closeLead(lead_id: number, loss_reason_id: number, kommoCLient: any) {
+    try {
+        const res = await fetch(`https://${kommoCLient.KOMMO_ACCOUNT_SUBDOMAIN}.kommo.com/api/v4/leads/${lead_id}`,
+            {
+                method: 'PATCH',
+                headers: {
+                    "Content-Type": "application/json",
+                    Accept: "application/json",
+                    Authorization: `Bearer ${kommoCLient.KOMMO_LONG_DURATION_TOKEN}`
+                },
+                body: JSON.stringify({
+                    status_id: CLOSED_LOST_STATUS_ID,
+                    loss_reason_id: loss_reason_id
+                })
+            }
+        );
+
+        if (!res.ok) {
+            const errorText = await res.text();
+            console.error(`❌ closeLead failed: HTTP ${res.status} - ${errorText}`);
+            return null;
+        }
+
+        const data = await res.json();
+        return data;
+    } catch (error) {
+        console.error("❌ closeLead failed: unable to close the specified lead.", error);
         return null;
     }
 }
