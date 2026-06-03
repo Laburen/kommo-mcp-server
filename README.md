@@ -47,6 +47,7 @@ Todas las tools de lead validan que el lead exista (`getLead`) antes de operar. 
 | `add_tag` | `lead_id`, `tag_id` | Agrega un tag al lead |
 | `add_budget` | `lead_id`, `budget_field_value` | Setea el presupuesto (`price`) del lead |
 | `request_human` | `lead_id`, `pipeline_id`, `status_id`, `switch_field_id`, `switch_field_value`, `note` | Escala a humano: mueve el lead + pausa el agente + agrega nota, en una sola llamada |
+| `close_lead` | `lead_id`, `loss_reason_id`, `note` | Cierra el lead como perdido (estado 143) + agrega nota, en una sola llamada |
 | `update_contact_field` | `contact_id`, `field_id`, `enum_id` | Actualiza un campo custom enum/select de un contacto |
 
 **`request_human`** corre best-effort: si un paso falla, los demás igual se ejecutan. Devuelve un JSON con `status` (`success` / `partial` / `error`) y el detalle de cada paso (`steps`, `failed_steps`).

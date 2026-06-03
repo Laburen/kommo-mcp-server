@@ -323,7 +323,7 @@ export class MyMCP extends McpAgent {
 		if (canUseTool(kommoCLient, "close_lead")) {
 			this.server.tool(
 				"close_lead",
-				"Closes a lead as lost in a single call. Sets the lead to the system 'lost' status (143) with the given loss reason, pauses the AI agent via the switch field, and adds a detailed note explaining why it was closed. Operations run best-effort: if one fails, the others still execute and the response reports the outcome of each step.",
+				"Closes a lead as lost in a single call. Sets the lead to the system 'lost' status (143) with the given loss reason and adds a detailed note explaining why it was closed. Operations run best-effort: if one fails, the other still executes and the response reports the outcome of each step.",
 				{
 					lead_id: z
 						.number()
@@ -331,14 +331,11 @@ export class MyMCP extends McpAgent {
 					loss_reason_id: z
 						.number()
 						.describe("ID of the loss reason to assign when closing the lead as lost. Must be a valid loss_reason_id from the Kommo account."),
-					switch_field_id: z
-						.number()
-						.describe("ID of the switch field that controls the AI agent pause state for this lead."),
 					note: z
 						.string()
 						.describe("Detailed note explaining why the lead is being closed/lost, stored in the lead's activity history.")
 				},
-				async ({ lead_id, loss_reason_id, switch_field_id, note }) => {
+				async ({ lead_id, loss_reason_id, note }) => {
 					try {
 						const lead = await getLead(lead_id, kommoCLient);
 
@@ -359,20 +356,17 @@ export class MyMCP extends McpAgent {
 						}
 
 						const closeRes = await closeLead(lead_id, loss_reason_id, kommoCLient);
-						const pauseRes = await pauseLeadAgent(lead_id, switch_field_id, true, kommoCLient); // true = pausado (hardcoded)
 						const noteRes = await addNoteToLead(lead_id, kommoCLient, note);
 
 						const steps = {
 							close_lead: closeRes !== null,
-							pause_agent: pauseRes !== null,
 							add_note: noteRes !== null
 						};
 
-						const allOk = steps.close_lead && steps.pause_agent && steps.add_note;
+						const allOk = steps.close_lead && steps.add_note;
 						const failed_steps: { step: string; hint: string }[] = [];
 
 						if (!steps.close_lead) failed_steps.push({ step: "close_lead", hint: "verify loss_reason_id is valid" });
-						if (!steps.pause_agent) failed_steps.push({ step: "pause_agent", hint: "verify switch_field_id" });
 						if (!steps.add_note) failed_steps.push({ step: "add_note", hint: "verify note content" });
 
 						return {
