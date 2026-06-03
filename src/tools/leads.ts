@@ -1,5 +1,18 @@
 const CLOSED_LOST_STATUS_ID = 143; // estado de sistema "Cerrado - no logrado" (perdido)
 
+// Mapeo de marca -> tag_id para Pueyrredón Motos (case-insensitive). Cualquier marca no listada usa "multimarca".
+const BRAND_TAG_IDS: Record<string, number> = {
+    honda: 2112127,
+    voge: 2111938,
+    hero: 2120830,
+};
+const MULTIMARCA_TAG_ID = 2186866;
+
+export function resolveBrandTagId(bike_brand: string): number {
+    const key = bike_brand.trim().toLowerCase();
+    return BRAND_TAG_IDS[key] ?? MULTIMARCA_TAG_ID;
+}
+
 export async function getLead(lead_id: number, kommoCLient: any) {
     try {
         const res = await fetch(`https://${kommoCLient.KOMMO_ACCOUNT_SUBDOMAIN}.kommo.com/api/v4/leads/${lead_id}`, {

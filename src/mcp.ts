@@ -1,7 +1,7 @@
 import { McpAgent } from "agents/mcp";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { addBudgetToLead, addNoteToLead, addTagToLead, closeLead, getLead, moveLead, pauseLeadAgent } from "./tools/leads";
+import { addBudgetToLead, addNoteToLead, addTagToLead, closeLead, getLead, moveLead, pauseLeadAgent, resolveBrandTagId } from "./tools/leads";
 import { updateContactField } from "./tools/contacts";
 import { canUseTool } from "./utils/canUseTools";
 
@@ -220,32 +220,28 @@ export class MyMCP extends McpAgent {
 			)
 		}
 
-		/*──────────────── request_human ──────────────*/
-		if (canUseTool(kommoCLient, "request_human")) {
+		/*──────────────── request_human_pueyrredon ──────────────*/
+		if (canUseTool(kommoCLient, "request_human_pueyrredon")) {
 			this.server.tool(
-				"request_human",
-				"Escalates a lead to a human agent in a single call. Moves the lead to the specified pipeline/status, pauses the AI agent via the switch field, and adds a summary note. Operations run best-effort: if one fails, the others still execute and the response reports the outcome of each step.",
+				"request_human_pueyrredon",
+				"Escalates a lead to a human agent at Pueyrredón Motos in a single call. First tags the lead by its motorcycle brand, then moves it to the human-attention pipeline/status, pauses the AI agent, and adds a summary note. Pipeline, status and switch field are fixed for this account. Operations run best-effort: if one fails, the others still execute and the response reports the outcome of each step.",
 				{
 					lead_id: z
 						.number()
 						.describe("Unique ID assigned by Kommo CRM to the lead. This identifier is used to fetch all related information for a specific lead within the system."),
-					pipeline_id: z
-						.number()
-						.describe("ID of the pipeline where the lead should be moved when escalating to a human."),
-					status_id: z
-						.number()
-						.describe("ID of the stage within the target pipeline where the lead should be placed."),
-					switch_field_id: z
-						.number()
-						.describe("ID of the switch field that controls the AI agent pause state for this lead."),
-					switch_field_value: z
-						.boolean()
-						.describe("Value to set on the switch field (typically false to pause the AI agent)."),
 					note: z
 						.string()
-						.describe("Summary note explaining why the lead is being escalated to a human, stored in the lead's activity history.")
+						.describe("Summary note explaining why the lead is being escalated to a human, stored in the lead's activity history."),
+					bike_brand: z
+						.string()
+						.describe("Motorcycle brand of the lead, used to tag it before escalating (case-insensitive). 'honda', 'voge' or 'hero' apply their corresponding tag; any other brand applies the 'multimarca' tag.")
 				},
-				async ({ lead_id, pipeline_id, status_id, switch_field_id, switch_field_value, note }) => {
+				async ({ lead_id, note, bike_brand }) => {
+					const PIPELINE_ID = 12719456;
+					const STATUS_ID = 98225860;
+					const SWITCH_FIELD_ID = 2984053;
+					const SWITCH_FIELD_VALUE = true;
+
 					try {
 						const lead = await getLead(lead_id, kommoCLient);
 
@@ -265,21 +261,28 @@ export class MyMCP extends McpAgent {
 							}
 						}
 
-						const moveRes = await moveLead(lead_id, pipeline_id, status_id, kommoCLient);
-						const pauseRes = await pauseLeadAgent(lead_id, switch_field_id, switch_field_value, kommoCLient);
+						// 1) Etiquetar PRIMERO según la marca (best-effort)
+						const tag_id = resolveBrandTagId(bike_brand);
+						const tagRes = await addTagToLead(lead_id, tag_id, kommoCLient);
+
+						// 2) Luego mover / pausar / nota
+						const moveRes = await moveLead(lead_id, PIPELINE_ID, STATUS_ID, kommoCLient);
+						const pauseRes = await pauseLeadAgent(lead_id, SWITCH_FIELD_ID, SWITCH_FIELD_VALUE, kommoCLient);
 						const noteRes = await addNoteToLead(lead_id, kommoCLient, note);
 
 						const steps = {
+							add_tag: tagRes !== null,
 							move_lead: moveRes !== null,
 							pause_agent: pauseRes !== null,
 							add_note: noteRes !== null
 						};
 
-						const allOk = steps.move_lead && steps.pause_agent && steps.add_note;
+						const allOk = steps.add_tag && steps.move_lead && steps.pause_agent && steps.add_note;
 						const failed_steps: { step: string; hint: string }[] = [];
 
-						if (!steps.move_lead) failed_steps.push({ step: "move_lead", hint: "verify pipeline_id and status_id" });
-						if (!steps.pause_agent) failed_steps.push({ step: "pause_agent", hint: "verify switch_field_id" });
+						if (!steps.add_tag) failed_steps.push({ step: "add_tag", hint: `verify bike_brand '${bike_brand}' -> tag_id ${tag_id}` });
+						if (!steps.move_lead) failed_steps.push({ step: "move_lead", hint: "verify hardcoded pipeline/status ids" });
+						if (!steps.pause_agent) failed_steps.push({ step: "pause_agent", hint: "verify hardcoded switch_field_id" });
 						if (!steps.add_note) failed_steps.push({ step: "add_note", hint: "verify note content" });
 
 						return {
@@ -300,7 +303,7 @@ export class MyMCP extends McpAgent {
 						}
 
 					} catch (error) {
-						console.error("💥 [request_human] Error:", error);
+						console.error("💥 [request_human_pueyrredon] Error:", error);
 						return {
 							content: [
 								{
