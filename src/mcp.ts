@@ -261,6 +261,29 @@ export class MyMCP extends McpAgent {
 							}
 						}
 
+						// Si el lead ya fue derivado (en la etapa de atención humana o con el agente pausado), no se repite la derivación
+						const { status_id, custom_fields_values } = lead as {
+							status_id?: number;
+							custom_fields_values?: { field_id: number; values?: { value: unknown }[] }[] | null;
+						};
+						const switchField = custom_fields_values?.find((f) => f.field_id === SWITCH_FIELD_ID);
+						const isPaused = switchField?.values?.[0]?.value === SWITCH_FIELD_VALUE;
+
+						if (status_id === STATUS_ID || isPaused) {
+							return {
+								content: [
+									{
+										type: "text",
+										text: JSON.stringify({
+											status: "already_escalated",
+											lead_id,
+											message: "This lead was already handed off to a human. Do not escalate again."
+										})
+									}
+								]
+							}
+						}
+
 						// 1) Etiquetar PRIMERO según la marca (best-effort)
 						const tag_id = resolveBrandTagId(bike_brand);
 						const tagRes = await addTagToLead(lead_id, tag_id, kommoCLient);
